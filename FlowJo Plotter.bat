@@ -1,0 +1,1 @@
+"%windir%\System32\cmd.exe" /k ""C:\Users\dpira\anaconda3\Scripts\activate.bat" "C:\Users\dpira\anaconda3" && python "C:\Science\Personal Code\FlowJoPlotter\FlowJo Plotter.py""

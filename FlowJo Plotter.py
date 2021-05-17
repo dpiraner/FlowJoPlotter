@@ -14,8 +14,6 @@ import math
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("TkAgg")
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from matplotlib.pyplot import figure as Figure
 import pickle 
 import os
 from functools import partial
@@ -27,12 +25,16 @@ settings = {
     'chartHeight': 5,
     'sepChar': '_',
     'errType': "Standard Deviation",
-    'initDir': ""
+    'initDir': "",
+    'legendPos': 'Best',
+    'legendPosAdjustX': '',
+    'legendPosAdjustY': ''
     }
 
 #create global variables for UI display
 settingsfile = 'settings.pk'
-errorTypes = ["Standard Deviation", "Standard Error"]        
+errorTypes = ["Standard Deviation", "Standard Error"]
+legendPositions = ['Best', 'Upper Right', 'Upper Left', 'Lower Left', 'Lower Right', 'Right', 'Center Left', 'Center Right', 'Lower Center', 'Upper Center', 'Center', 'Manual']       
 currentFile = ''
 data = {}
 samples = [] #sample names (e.g. circuit1, circuit2)
@@ -43,8 +45,99 @@ headers = [] #FlowJo statistics; e.g. MFI, % positive
 global entry_Width
 global entry_Height
 global entry_sepChar
+global legendPosition
+global entry_LegendAdjustX
+global entry_LegendAdjustY
+global list_Samples
+global list_Groups
+global list_Headers
+
+#functions for moving listbox items
+
+def moveup(listbox, name, *args):
+   pos=1
+   try:
+       listbox.idxs = listbox.curselection()
+       if not listbox.idxs:
+           return
+       for pos in listbox.idxs:
+           if pos==0:
+               continue
+           text=listbox.get(pos)
+           listbox.delete(pos)
+           listbox.insert(pos-1, text)
+           listbox.pop(pos)
+           listbox.insert(pos-1, text)
+           
+   except:
+       pass
+
+   if name=='samples':
+       global samples
+       samples=list(listbox.get(0, tk.END)) #explicit cast to list because listbox.get() returns tuple because god knows why
+       global list_Samples
+       list_Samples.selection_set(pos-1)
+   elif name=='groups':
+       global categories
+       categories=list(listbox.get(0, tk.END))
+       global list_Groups
+       list_Groups.selection_set(pos-1)
+   elif name=='headers':
+       global headers
+       headers = list(listbox.get(0, tk.END))
+       headers.insert(0, 'samples')
+       global list_Headers
+       list_Headers.selection_set(pos-1)
+
+def movedown(listbox, name, *args):
+   pos=1
+   try:
+       listbox.idxs = listbox.curselection()
+       if not listbox.idxs:
+           return
+       for pos in listbox.idxs:
+           text=listbox.get(pos)
+           listbox.delete(pos)
+           listbox.insert(pos+1, text)
+           listbox.pop(pos)
+           listbox.insert(pos+1, text)
+           
+   except:
+       pass
+
+   if name=='samples':
+       global samples
+       samples=list(listbox.get(0, tk.END))
+       global list_Samples
+       list_Samples.selection_set(pos+1)
+   elif name=='groups':
+       global categories
+       categories=list(listbox.get(0, tk.END))
+       global list_Groups
+       list_Groups.selection_set(pos+1)
+   elif name=='headers':
+       global headers
+       headers=list(listbox.get(0, tk.END))
+       headers.insert(0, 'samples')
+       global list_Headers
+       list_Headers.selection_set(pos+1)
+
 
 # Loading and plotting functions
+def strToNum(s):
+    try:
+        return float(s)
+    except:
+        return 0
+    
+def getMaxColumnLength(col):
+    max =  0
+    for entry in col:
+        l = len(str(entry))
+        if (l > max):
+            max = l
+    return max
+
 def computeError(numArr):
     eType = str(errorBarType.get())
     if (eType == "Standard Deviation"):
@@ -60,6 +153,12 @@ def parseData():
     global samples
     global categories
     global headers
+    
+    #clear previous
+    data = {}
+    samples = []
+    categories = []
+    headers = []
     
     #prepare data structure
     headers = list(df.columns)
@@ -98,7 +197,6 @@ def parseData():
                 values = data[header][sample][category]['values']
                 data[header][sample][category]['average'] = np.mean(values)
                 data[header][sample][category]['error'] = computeError(values)
-                dbg = ""
 
 def divideAndPropagate(numerator, numErr, denominator, denomErr):
     quotient = numerator / denominator
@@ -171,7 +269,9 @@ def normalizeData():
 
 def plotData():
     
-    normalized = normalizeData()
+    normalized = normalizeData() #will return the original input if no normalization required
+    
+    isNormalized = normalizationRequired()
     
     ind = np.arange(len(samples))  
     numGroups = len(categories)
@@ -195,7 +295,7 @@ def plotData():
     
     for header in headers[1:]:
         
-        fig = plt.figure(figsize = (plotW, plotH))
+        plt.figure(figsize = (plotW, plotH))
         
         for i, category in enumerate(categories):
             dataForCat = []
@@ -213,11 +313,28 @@ def plotData():
                 plt.bar(ind + startPos + (i+1) * gap, dataForCat, width = gap, label = category, color = colors[i]) 
         
         plt.xticks([r + gap for r in range(len(samples))], samples, rotation = 45, fontsize=12, fontname='Arial', ha='right')
-        plt.ylabel(header, fontsize=12, fontname='Arial')
-        plt.legend(loc='upper right',
-          fancybox=True, shadow=True)
+        if not isNormalized:
+            plt.ylabel(header, fontsize=12, fontname='Arial')
+        else:
+            yLabel = header + " (Normalized)"
+            plt.ylabel(yLabel, fontsize=12, fontname='Arial')
+        
+        
+        
+        legendLocation = legendPosition.get().lower()
+        if not legendLocation == 'manual':
+            plt.legend(loc=legendLocation, frameon=False, fancybox=False, shadow=False)
+        else:
+            adjX = strToNum(entry_LegendAdjustX.get())  / 10
+            adjY = -strToNum(entry_LegendAdjustY.get()) / 10
+            plt.legend(loc='lower center', bbox_to_anchor=(adjX, adjY), fancybox=False, shadow=False, frameon=False, ncol=len(categories))
+            plt.subplots_adjust(bottom=0.25)
+            
         plt.tight_layout()
         plt.show()
+        
+    defaultDir = os.path.dirname(currentFile)    
+    matplotlib.rcParams['savefig.directory'] = defaultDir #set the default figure save directory to the data input directory
 
 def getMaxValueCount(header, category):
     max = 0
@@ -226,31 +343,50 @@ def getMaxValueCount(header, category):
             max = len(data[header][sample][category]['values'])
     return max
 
-def saveExcel():
+def GetLongestSampleNameLength():
+    max = 0
+    global samples
+    for sample in samples:
+        if len(sample) > max:
+            max = len(sample)
+    return max
+
+def prepareData():
     isNormalized = normalizationRequired()
     normalizedData = {}
     if isNormalized:
         normalizedData = normalizeData()
-    
-    writer = pd.ExcelWriter('output.xlsx', engine='xlsxwriter')        
+        
+    maxColumn = 0
+    dfs = []
     for header in headers[1:]:
         #new excel sheet
         rows = []
         columnHeaders = []
         
-        #write column headeres
+        maxSubColumn = 0
+        
+        #write column headers
         for i, category in enumerate(categories):
             for j in range(getMaxValueCount(header, category)):
                 columnHeaders.append(category)
+                maxSubColumn += 1
         for i, category in enumerate(categories):
                 columnHeaders.append('Average: ' + category)
+                maxSubColumn += 1
         for i, category in enumerate(categories):
-                columnHeaders.append('Error: ' + category)        
+                columnHeaders.append('Error: ' + category)
+                maxSubColumn += 1
         if isNormalized:
             for i, category in enumerate(categories):
                 columnHeaders.append('Normalized Average: ' + category)
+                maxSubColumn += 1
             for i, category in enumerate(categories):
-                columnHeaders.append('Normalized Error: ' + category)  
+                columnHeaders.append('Normalized Error: ' + category) 
+                maxSubColumn += 1
+        
+        if maxSubColumn > maxColumn:
+            maxColumn = maxSubColumn
         
         #write data
         for sample in samples:
@@ -279,10 +415,56 @@ def saveExcel():
             
             rows.append(row)
         df = pd.DataFrame(rows, index=samples, columns=columnHeaders)
-        df.to_excel(writer, sheet_name=header)
-        
-    writer.save()
+        dfs.append(df)
+    return dfs
+
+def saveExcel():
+    defaultDir = os.path.dirname(currentFile)
+    types = [('Excel Files (*.xlsx)', '*.xlsx')]
+    outputFile = filedialog.asksaveasfilename(initialdir = defaultDir, filetypes=types, defaultextension=types)
+    if outputFile == '':
+        return
     
+    dfs = prepareData()
+    
+    writer = pd.ExcelWriter(outputFile, engine='xlsxwriter')
+    wb = writer.book    
+    cell_Format_Header = wb.add_format({'bold': True, 'align': 'left'})
+    
+    for index, header in enumerate(headers[1:]):
+        df = dfs[index]
+        df.to_excel(writer, sheet_name=header, startrow=1, header=False) #turn off auto-header to alow custom format
+        
+        #write headers with custom format https://xlsxwriter.readthedocs.io/example_pandas_header_format.html
+        ws = writer.sheets[header]
+        writer.sheets[header].set_column(0,0,GetLongestSampleNameLength() * 1.1) #set first column width according to max sample name length
+        for col_num, value in enumerate(df.columns.values):  
+            ws.write(0, col_num + 1, value, cell_Format_Header)
+            #set column width according to header width
+            writer.sheets[header].set_column(col_num+1, col_num+1, len(value) * 1.1)
+        
+        #Make row headers also left-justified
+        s_idx = 0
+        for row_name, row in df.iterrows(): 
+            ws = writer.sheets[header]
+            ws.write(s_idx + 1, 0, row_name, cell_Format_Header)
+            s_idx += 1
+
+    writer.save()
+
+def saveCSV():
+    defaultDir = os.path.dirname(currentFile)
+    outputDir = filedialog.askdirectory(initialdir = defaultDir)
+    if outputDir == '':
+        return
+    
+    dfs = prepareData()
+    for index, header in enumerate(headers[1:]):
+        df = dfs[index]
+        outputPath = os.path.join(outputDir, header) + '.csv'
+        
+        df.to_csv(outputPath)
+     
 def unique(input):
     
     output = []
@@ -391,6 +573,7 @@ def on_closing():
     global entry_Width
     global entry_Height
     global entry_sepChar
+    global legendPosition
     
     try:
         settings['chartWidth'] = int(entry_Width.get())
@@ -398,6 +581,9 @@ def on_closing():
         settings['sepChar'] = entry_sepChar.get()
         settings['errType'] = str(errorBarType.get())
         settings['initDir'] = os.path.dirname(currentFile)
+        settings['legendPos'] = legendPosition.get()
+        settings['legendPosAdjustX'] = entry_LegendAdjustX.get()
+        settings['legendPosAdjustY'] = entry_LegendAdjustY.get()
 
         with open(settingsfile, "wb") as f:
             pickle.dump(settings, f, pickle.HIGHEST_PROTOCOL)
@@ -431,20 +617,42 @@ window.wm_title('FlowJo Table Plotting For Lazy Academics')
 label_LS = tk.Label(window, text = "Loaded Samples ", bg="white")
 list_Samples = tk.Listbox(window, listvariable=samples, selectmode=tk.SINGLE, width=20, height=10)
 
+moveSampleUp = partial(moveup, list_Samples, 'samples')
+button_MoveSampleUp = tk.Button(window,
+                        text = u"\u1403", fg='white', bg='black',
+                        command = moveSampleUp)
+moveSampleDown = partial(movedown, list_Samples, 'samples')
+button_MoveSampleDown = tk.Button(window,
+                        text = u"\u1401", fg='white', bg='black',
+                        command = moveSampleDown)
+
 label_LG = tk.Label(window, text = "Loaded Groups ", bg="white")
 list_Groups = tk.Listbox(window, listvariable=categories, selectmode=tk.SINGLE, width=20, height=10)
+
+moveGroupUp = partial(moveup, list_Groups, 'groups')
+button_MoveGroupUp = tk.Button(window,
+                        text = u"\u1403", fg='white', bg='black',
+                        command = moveGroupUp)
+moveGroupDown = partial(movedown, list_Groups, 'groups')
+button_MoveGroupDown = tk.Button(window,
+                        text = u"\u1401", fg='white', bg='black',
+                        command = moveGroupDown)
 
 label_LH = tk.Label(window, text = "Loaded Headers ", bg="white")
 list_Headers = tk.Listbox(window, listvariable=headers, selectmode=tk.SINGLE, width=20, height=10)
 
+moveHeaderUp = partial(moveup, list_Headers, 'headers')
+button_MoveHeaderUp = tk.Button(window,
+                        text = u"\u1403", fg='white', bg='black',
+                        command = moveHeaderUp)
+moveHeaderDown = partial(movedown, list_Headers, 'headers')
+button_MoveHeaderDown = tk.Button(window,
+                        text = u"\u1401", fg='white', bg='black',
+                        command = moveHeaderDown)
+
 label_SS = tk.Label(window, text = "Normalize to Sample: ", bg="white")
-#list_Selected_Samples = tk.Listbox(window, listvariable=samples, selectmode=tk.SINGLE, width=20, height=5)
-
 label_SG = tk.Label(window, text = "Normalize to Group: ", bg="white")
-#list_Selected_Groups = tk.Listbox(window, listvariable=categories, selectmode=tk.SINGLE, width=20, height=5)
-
 label_SH = tk.Label(window, text = "Normalize to Header: ", bg="white")
-#list_Selected_Headers = tk.Listbox(window, listvariable=headers, selectmode=tk.SINGLE, width=20, height=5)
 
 #Define data loading functions
 loadFromLastDir = partial(loadData, settings['initDir'], list_Samples, list_Groups, list_Headers) 
@@ -456,9 +664,13 @@ button_plotFile = tk.Button(window,
                         text = "Plot Data", fg='white', bg='black',
                         command = plotData)
 
-button_writeTable = tk.Button(window,
+button_writeExcel = tk.Button(window,
                         text = "Save to Excel", fg='white', bg='black',
                         command = saveExcel)
+
+button_writeCSV = tk.Button(window,
+                        text = "Save to CSV", fg='white', bg='black',
+                        command = saveCSV)
   
 button_exit = tk.Button(window,
                      text = "Exit", fg='white', bg='black',
@@ -484,6 +696,20 @@ drop_Err = tk.OptionMenu(window, errorBarType, *errorTypes)
 drop_Err.config(bg = "black", fg="white") 
 drop_Err.pack()
 
+label_LegendPos = tk.Label(window, text = "Legend Position: ", bg="white")
+legendPosition = tk.StringVar(window)
+legendPosition.set(settings['legendPos'])
+drop_LegendPos = tk.OptionMenu(window, legendPosition, *legendPositions)
+drop_LegendPos.config(bg = "black", fg="white") 
+drop_LegendPos.pack()
+
+label_LegendAdjustX = tk.Label(window, text = "X: ", bg="white")
+entry_LegendAdjustX = tk.Entry(window, width=5)
+entry_LegendAdjustX.insert(-1, settings['legendPosAdjustX'])
+label_LegendAdjustY = tk.Label(window, text = "Y: ", bg="white")
+entry_LegendAdjustY = tk.Entry(window, width=5)
+entry_LegendAdjustY.insert(-1, settings['legendPosAdjustY'])
+
 normalizing_Sample = tk.StringVar(window)
 normalizing_Group = tk.StringVar(window)
 normalizing_Header = tk.StringVar(window)
@@ -492,7 +718,6 @@ label_nS = tk.Label(window, textvariable = normalizing_Sample, bg="white")
 label_nG = tk.Label(window, textvariable = normalizing_Group, bg="white")
 label_nH = tk.Label(window, textvariable = normalizing_Header, bg="white")
 
-#normToSelSample = partial(normToSelected, list_Samples, list_Selected_Samples)
 setNormToSelSample = partial(selectNormalizationSample, list_Samples)
 button_normToSelSample = tk.Button(window,
                         text = "Normalize to Selected", fg='white', bg='black',
@@ -502,7 +727,6 @@ button_ClearNormToSelSample = tk.Button(window,
                         text = "Clear", fg='white', bg='black',
                         command = clearNormalizingSample)
 
-#normToSelGroups = partial(normToSelected, list_Groups, list_Selected_Groups)
 setNormToSelGroup = partial(selectNormalizationGroup, list_Groups)
 button_normToSelGroup = tk.Button(window,
                         text = "Normalize to Selected", fg='white', bg='black',
@@ -526,44 +750,56 @@ canvas1.create_window(50, 25, window=label_Width)
 canvas1.create_window(110, 25, window=entry_Width)
 canvas1.create_window(250, 25, window=label_Height)
 canvas1.create_window(310, 25, window=entry_Height)
+
 canvas1.create_window(85, 50, window=label_SepChar)
 canvas1.create_window(175, 50, window=entry_sepChar)
 canvas1.create_window(240, 50, window=label_Err)
 canvas1.create_window(350, 50, window=drop_Err)
 
-canvas1.create_window(50, 80, window=button_getFile)
-canvas1.create_window(125, 80, window=button_plotFile)
-canvas1.create_window(210, 80, window=button_writeTable)
-canvas1.create_window(175, 110, window=button_exit)
+canvas1.create_window(60, 80, window=label_LegendPos)
+canvas1.create_window(175, 80, window=drop_LegendPos)
+canvas1.create_window(275, 80, window=label_LegendAdjustX)
+canvas1.create_window(305, 80, window=entry_LegendAdjustX)
+canvas1.create_window(375, 80, window=label_LegendAdjustY)
+canvas1.create_window(405, 80, window=entry_LegendAdjustY)
+
+canvas1.create_window(50, 115, window=button_getFile)
+canvas1.create_window(125, 115, window=button_plotFile)
+canvas1.create_window(210, 115, window=button_writeExcel)
+canvas1.create_window(305, 115, window=button_writeCSV)
+canvas1.create_window(380, 115, window=button_exit)
 
 canvas1.create_window(75, 150, window=label_LS)
 canvas1.create_window(75, 250, window=list_Samples)
+canvas1.create_window(128, 150, window=button_MoveSampleUp)
+canvas1.create_window(20, 150, window=button_MoveSampleDown)
 
 canvas1.create_window(225, 150, window=label_LG)
 canvas1.create_window(225, 250, window=list_Groups)
+canvas1.create_window(275, 150, window=button_MoveGroupUp)
+canvas1.create_window(173, 150, window=button_MoveGroupDown)
 
 canvas1.create_window(375, 150, window=label_LH)
 canvas1.create_window(375, 250, window=list_Headers)
+canvas1.create_window(428, 150, window=button_MoveHeaderUp)
+canvas1.create_window(320, 150, window=button_MoveHeaderDown)
 
-canvas1.create_window(75, 350, window=button_normToSelSample)
-canvas1.create_window(225, 350, window=button_normToSelGroup)
-canvas1.create_window(375, 350, window=button_normToSelHeader)
+canvas1.create_window(75, 400, window=button_normToSelSample)
+canvas1.create_window(225, 400, window=button_normToSelGroup)
+canvas1.create_window(375, 400, window=button_normToSelHeader)
 
-canvas1.create_window(75, 375, window=button_ClearNormToSelSample)
-canvas1.create_window(225, 375, window=button_ClearNormToSelGroup)
-canvas1.create_window(375, 375, window=button_ClearNormToSelHeader)
+canvas1.create_window(75, 425, window=button_ClearNormToSelSample)
+canvas1.create_window(225, 425, window=button_ClearNormToSelGroup)
+canvas1.create_window(375, 425, window=button_ClearNormToSelHeader)
 
-canvas1.create_window(75, 400, window=label_SS)
-canvas1.create_window(75, 450, window=label_nS)
-#canvas1.create_window(75, 450, window=list_Selected_Samples)
+canvas1.create_window(75, 450, window=label_SS)
+canvas1.create_window(75, 475, window=label_nS)
 
-canvas1.create_window(225, 400, window=label_SG)
-canvas1.create_window(225, 450, window=label_nG)
-#canvas1.create_window(225, 450, window=list_Selected_Groups)
+canvas1.create_window(225, 450, window=label_SG)
+canvas1.create_window(225, 475, window=label_nG)
 
-canvas1.create_window(375, 400, window=label_SH)
-canvas1.create_window(375, 450, window=label_nH)
-#canvas1.create_window(375, 450, window=list_Selected_Headers)
+canvas1.create_window(375, 450, window=label_SH)
+canvas1.create_window(375, 475, window=label_nH)
      
 window.protocol("WM_DELETE_WINDOW", on_closing)
 
