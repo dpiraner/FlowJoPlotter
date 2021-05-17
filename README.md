@@ -52,6 +52,7 @@ Find someone with a Mac who can help you with installing Anaconda and launching 
 **Exit**: Self-explanatory, hopefully.
 
 **Normalize to Selected**: Data can be normalized to a sample, group, or column. Up to one of each can be chosen. Error will be propagated.
+
 **Clear** Clears the selected normalizing sample/group/column
 
 ## Example Usages
